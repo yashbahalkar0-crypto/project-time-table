@@ -324,7 +324,11 @@ router.delete('/entry/:entryId', authenticate, requireAdmin, async (req: AuthReq
 // Delete entire schedule
 router.delete('/:id', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    await prisma.schedule.delete({ where: { id: req.params.id } });
+    const scheduleId = req.params.id;
+    await prisma.$transaction(async (tx) => {
+      await tx.scheduleEntry.deleteMany({ where: { scheduleId } });
+      await tx.schedule.delete({ where: { id: scheduleId } });
+    });
     res.json({ message: 'Deleted' });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
