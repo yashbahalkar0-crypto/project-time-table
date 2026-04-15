@@ -24,8 +24,14 @@ router.post('/', authenticate, requireAdmin, async (req: AuthRequest, res: Respo
 router.post('/bulk', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const { slots } = req.body;
-    const created = await prisma.timeSlot.createMany({ data: slots, skipDuplicates: true });
-    res.status(201).json({ count: created.count });
+    let count = 0;
+    for (const slot of slots) {
+      try {
+        await prisma.timeSlot.create({ data: slot });
+        count++;
+      } catch { /* skip duplicates */ }
+    }
+    res.status(201).json({ count });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
