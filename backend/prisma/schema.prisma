@@ -1,0 +1,244 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ────────────────────────────────────────────────────────────────
+// Authentication
+// Role values: ADMIN, FACULTY
+// ────────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      String   @default("FACULTY")
+  teacherId String?  @unique
+  teacher   Teacher? @relation(fields: [teacherId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+// ────────────────────────────────────────────────────────────────
+// Academic Entities
+// ────────────────────────────────────────────────────────────────
+
+model Department {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  code      String    @unique
+  teachers  Teacher[]
+  subjects  Subject[]
+  batches   Batch[]
+  rooms     Room[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@map("departments")
+}
+
+model Semester {
+  id        String    @id @default(uuid())
+  name      String
+  number    Int
+  year      Int
+  isActive  Boolean   @default(true)
+  subjects  Subject[]
+  batches   Batch[]
+  schedules Schedule[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([number, year])
+  @@map("semesters")
+}
+
+model Teacher {
+  id             String           @id @default(uuid())
+  name           String
+  email          String           @unique
+  phone          String?
+  departmentId   String
+  department     Department       @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  maxLecturesDay Int              @default(5)
+  subjects       SubjectTeacher[]
+  user           User?
+  scheduleEntries ScheduleEntry[]
+  constraints    Constraint[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@map("teachers")
+}
+
+model Subject {
+  id             String           @id @default(uuid())
+  name           String
+  code           String           @unique
+  departmentId   String
+  department     Department       @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  semesterId     String
+  semester       Semester         @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  lecturesPerWeek Int             @default(3)
+  isLab          Boolean          @default(false)
+  labDuration    Int              @default(2)  // in consecutive slots
+  creditHours    Int              @default(3)
+  teachers       SubjectTeacher[]
+  scheduleEntries ScheduleEntry[]
+  constraints    Constraint[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@map("subjects")
+}
+
+model SubjectTeacher {
+  id        String  @id @default(uuid())
+  subjectId String
+  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  teacherId String
+  teacher   Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@unique([subjectId, teacherId])
+  @@map("subject_teachers")
+}
+
+// RoomType values: CLASSROOM, LAB, SEMINAR_HALL, AUDITORIUM
+
+model Room {
+  id             String          @id @default(uuid())
+  name           String          @unique
+  code           String          @unique
+  type           String          @default("CLASSROOM")
+  capacity       Int             @default(60)
+  departmentId   String?
+  department     Department?     @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  hasProjector   Boolean         @default(false)
+  hasAC          Boolean         @default(false)
+  scheduleEntries ScheduleEntry[]
+  constraints    Constraint[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@map("rooms")
+}
+
+model Batch {
+  id             String          @id @default(uuid())
+  name           String
+  code           String          @unique
+  departmentId   String
+  department     Department      @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  semesterId     String
+  semester       Semester        @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  studentCount   Int             @default(60)
+  maxLecturesDay Int             @default(6)
+  scheduleEntries ScheduleEntry[]
+  constraints    Constraint[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@map("batches")
+}
+
+model TimeSlot {
+  id        String          @id @default(uuid())
+  label     String          // e.g. "9:00 - 9:50"
+  startTime String          // "09:00"
+  endTime   String          // "09:50"
+  dayOfWeek Int             // 0=Mon, 1=Tue, ... 4=Fri
+  slotIndex Int             // order within the day
+  isBreak   Boolean         @default(false)
+  scheduleEntries ScheduleEntry[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@unique([dayOfWeek, slotIndex])
+  @@map("time_slots")
+}
+
+// ────────────────────────────────────────────────────────────────
+// Constraints
+// ────────────────────────────────────────────────────────────────
+
+// ConstraintType values: TEACHER_AVAILABILITY, TEACHER_MAX_LECTURES, TEACHER_PREFERRED_SLOTS,
+// TEACHER_NO_EARLY_MORNING, SUBJECT_CONSECUTIVE_LABS, SUBJECT_BEFORE_OTHER, SUBJECT_REPETITION_LIMIT,
+// ROOM_LAB_ONLY, ROOM_CAPACITY, ROOM_DEPARTMENT_SPECIFIC, BATCH_NO_OVERLAP, BATCH_MAX_LECTURES,
+// BATCH_MANDATORY_BREAK, GLOBAL_NO_TEACHER_CONFLICT, GLOBAL_NO_ROOM_CONFLICT, GLOBAL_BALANCED_WORKLOAD,
+// GLOBAL_NO_HEAVY_CONSECUTIVE, CUSTOM
+
+// ConstraintPriority values: MANDATORY, HIGH, MEDIUM, LOW
+
+model Constraint {
+  id          String             @id @default(uuid())
+  name        String
+  type        String
+  priority    String             @default("HIGH")
+  isActive    Boolean            @default(true)
+  parameters  String               @default("{}") // JSON string for constraint-specific params
+  teacherId   String?
+  teacher     Teacher?           @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  subjectId   String?
+  subject     Subject?           @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  roomId      String?
+  room        Room?              @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  batchId     String?
+  batch       Batch?             @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@map("constraints")
+}
+
+// ────────────────────────────────────────────────────────────────
+// Schedule
+// ────────────────────────────────────────────────────────────────
+
+// ScheduleStatus values: DRAFT, PUBLISHED, ARCHIVED
+
+model Schedule {
+  id             String          @id @default(uuid())
+  name           String
+  semesterId     String
+  semester       Semester        @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  status         String          @default("DRAFT")
+  fitnessScore   Float           @default(0)
+  conflictCount  Int             @default(0)
+  generationTime Int?            // ms taken to generate
+  entries        ScheduleEntry[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@map("schedules")
+}
+
+model ScheduleEntry {
+  id         String   @id @default(uuid())
+  scheduleId String
+  schedule   Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  subjectId  String
+  subject    Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  teacherId  String
+  teacher    Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  roomId     String
+  room       Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  batchId    String
+  batch      Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  timeSlotId String
+  timeSlot   TimeSlot @relation(fields: [timeSlotId], references: [id], onDelete: Cascade)
+  isLocked   Boolean  @default(false) // locked entries won't be changed during regen
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([scheduleId, teacherId, timeSlotId])   // no teacher conflict
+  @@unique([scheduleId, roomId, timeSlotId])       // no room conflict
+  @@unique([scheduleId, batchId, timeSlotId])      // no batch overlap
+  @@map("schedule_entries")
+}
